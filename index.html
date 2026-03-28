@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste WebSocket - Virtual Office</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #1e1e2e; color: #cdd6f4; }
+        .container { max-width: 600px; margin: auto; background: #313244; padding: 20px; border-radius: 8px; }
+        input, button { padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; border-radius: 4px; border: none; }
+        input { background-color: #45475a; color: #fff; }
+        button { background-color: #89b4fa; color: #11111b; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #74c7ec; }
+        #chat-box { border: 1px solid #45475a; height: 300px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; background-color: #181825; border-radius: 4px; }
+        .message { margin-bottom: 8px; }
+        .sender { font-weight: bold; color: #f38ba8; }
+        .timestamp { font-size: 0.8em; color: #a6adc8; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Teste de Chat STOMP</h2>
+
+    <label>ID da Sala (Room UUID):</label>
+    <input type="text" id="roomId" placeholder="Cole o ROOM_ID aqui...">
+
+    <label>Seu ID (User UUID):</label>
+    <input type="text" id="userId" placeholder="Cole o USER_ID aqui...">
+
+    <button id="connectBtn" onclick="connect()">Conectar na Sala</button>
+    <button id="disconnectBtn" onclick="disconnect()" disabled style="background-color: #eba0ac;">Desconectar</button>
+
+    <hr style="border-color: #45475a;">
+
+    <div id="chat-box"></div>
+
+    <input type="text" id="messageInput" placeholder="Digite sua mensagem..." disabled>
+    <button id="sendBtn" onclick="sendMessage()" disabled>Enviar Mensagem</button>
+</div>
+
+<script>
+    let stompClient = null;
+    let currentRoomId = null;
+
+    /**
+     * Inicia a conexão com o servidor Spring Boot.
+     */
+    function connect() {
+        const roomIdInput = document.getElementById('roomId').value.trim();
+        if (!roomIdInput) {
+            alert("Por favor, insira o ID da Sala.");
+            return;
+        }
+        currentRoomId = roomIdInput;
+
+        // Aponta para o endpoint configurado na classe WebSocketConfig do Spring
+        const socket = new SockJS('http://localhost:8080/ws');
+        stompClient = Stomp.over(socket);
+
+        stompClient.connect({}, function (frame) {
+            console.log('Conectado: ' + frame);
+
+            // Altera o estado dos botões
+            document.getElementById('connectBtn').disabled = true;
+            document.getElementById('disconnectBtn').disabled = false;
+            document.getElementById('messageInput').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
+
+            // Inscreve-se no tópico da sala específica para receber as mensagens
+            // O caminho deve casar exatamente com o envio feito no ChatController
+            stompClient.subscribe('/topic/room/' + currentRoomId, function (messageOutput) {
+                const messageData = JSON.parse(messageOutput.body);
+                console.log("Mensagem recebida do servidor: ", messageData);
+                showMessage(messageData);
+            });
+
+            showMessage({ senderUsername: 'Sistema', content: 'Você entrou na sala.', timestamp: new Date().toISOString() });
+        }, function(error) {
+            console.error('Erro de conexão WebSocket:', error);
+            alert("Não foi possível conectar ao servidor. Verifique se o Spring Boot está rodando.");
+        });
+    }
+
+    /**
+     * Encerra a conexão WebSocket.
+     */
+    function disconnect() {
+        if (stompClient !== null) {
+            stompClient.disconnect();
+        }
+        // Reseta a interface
+        document.getElementById('connectBtn').disabled = false;
+        document.getElementById('disconnectBtn').disabled = true;
+        document.getElementById('messageInput').disabled = true;
+        document.getElementById('sendBtn').disabled = true;
+        console.log("Desconectado.");
+        showMessage({ senderUsername: 'Sistema', content: 'Você saiu da sala.', timestamp: new Date().toISOString() });
+    }
+
+    /**
+     * Envia o payload de mensagem (DTO) para o backend.
+     */
+    function sendMessage() {
+        const userId = document.getElementById('userId').value.trim();
+        const content = document.getElementById('messageInput').value.trim();
+
+        if (!userId || !content) {
+            alert("Insira seu User ID e digite uma mensagem.");
+            return;
+        }
+
+        // Monta o objeto idêntico ao ChatMessageRequest (Record) criado no backend
+        const messagePayload = {
+            senderId: userId,
+            content: content
+        };
+
+        // Envia para o destino mapeado no @MessageMapping do Controller
+        stompClient.send("/app/chat/sendMessage/" + currentRoomId, {}, JSON.stringify(messagePayload));
+
+        // Limpa o input
+        document.getElementById('messageInput').value = '';
+    }
+
+    /**
+     * Renderiza a mensagem na tela.
+     */
+    function showMessage(message) {
+        const chatBox = document.getElementById('chat-box');
+        const messageElement = document.createElement('div');
+        messageElement.className = 'message';
+
+        const time = new Date(message.timestamp).toLocaleTimeString();
+
+        messageElement.innerHTML = `
+            <span class="timestamp">[${time}]</span>
+            <span class="sender">${message.senderUsername}:</span>
+            <span class="content">${message.content}</span>
+        `;
+
+        chatBox.appendChild(messageElement);
+        // Rola o chat para baixo automaticamente
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+</script>
+
+</body>
+</html>
